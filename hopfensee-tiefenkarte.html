@@ -709,6 +709,20 @@ input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent)}
 .leaflet-container{font-family:inherit}
 .leaflet-control-attribution{font-size:10px;max-width:70vw}
 .depthlbl{white-space:nowrap;background:transparent;border:0;box-shadow:none;color:#fff;font-weight:700;text-shadow:0 0 3px #000,0 0 3px #000}
+
+#controls{max-height:calc(100vh - 90px);overflow:auto}
+#wx{margin-top:10px;padding-top:8px;border-top:1px solid var(--line)}
+#wx h3{margin:0 0 6px;font-size:13.5px}
+#wxnow{display:grid;grid-template-columns:1fr 1fr;gap:6px 10px;font-size:13px}
+#wxnow div{line-height:1.25}
+#wxnow b{display:block;font-size:15px}
+#wxnow span{color:var(--muted);font-size:11.5px}
+#wxstrip{display:flex;gap:4px;overflow-x:auto;margin-top:8px;padding-bottom:4px}
+#wxstrip div{flex:0 0 56px;white-space:nowrap;text-align:center;font-size:11.5px;border:1px solid var(--line);border-radius:8px;padding:4px 2px}
+#wxstrip svg{display:block;margin:2px auto}
+#wx small{display:block;color:var(--muted);font-size:10.5px;margin-top:4px}
+.windicon{display:flex;flex-direction:column;align-items:center;transform:translate(-50%,-50%)}
+.windicon span{font-weight:700;font-size:12px;color:#fff;text-shadow:0 0 3px #000,0 0 3px #000;white-space:nowrap}
 </style>
 </head>
 <body>
@@ -730,6 +744,13 @@ input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent)}
     <div id="legendlbl"><span>0 m</span><span>5 m</span><span>10,9 m</span></div>
     <button class="btn" id="locate">Mein Standort</button>
     <button class="btn" id="fit">Ganzer See</button>
+    <div id="wx">
+      <h3>Wetter am Hopfensee</h3>
+      <div id="wxnow">lädt …</div>
+      <div id="wxstrip"></div>
+      <div class="row"><input id="cw" type="checkbox" checked><label for="cw">Windpfeil auf der Karte</label></div>
+      <small>Wetterdaten: Open-Meteo.com (CC BY 4.0)</small>
+    </div>
   </div>
 </div>
 
@@ -742,6 +763,7 @@ input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent)}
   <p><b>Tiefenkarte:</b> © Österreichische Wasserrettung – Landesverband Tirol, Rudolf Loferer, <a href="https://seenatlas.wasserrettung-tirol.at" target="_blank" rel="noopener">seenatlas.wasserrettung-tirol.at</a>, Lizenz CC&nbsp;BY-ND&nbsp;4.0. Die Tiefenlinien wurden für diese Ansicht georeferenziert und umgerechnet.</p>
   <p><b>Daten:</b> Bayerische Vermessungsverwaltung (<a href="https://www.geodaten.bayern.de" target="_blank" rel="noopener">geodaten.bayern.de</a>); © OpenStreetMap-Mitwirkende (ODbL&nbsp;1.0). Der Seegrund ist aus den Tiefenlinien der DTK25 Bayern genähert.</p>
   <p><b>Tiefenangaben:</b> Tiefen in m unter dem Wasserspiegel (783,9&nbsp;m ü.&nbsp;NHN), Linien alle 1&nbsp;m. Beim Antippen wird die Tiefenstufe angezeigt (z.&nbsp;B. „1–2 m“), keine Messung.</p>
+  <p><b>Wetter:</b> Daten von <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo.com</a> (CC BY 4.0), Modellwerte für den Seemittelpunkt, keine Messung vor Ort.</p>
   <p><b>Hintergrundkarten:</b> © OpenStreetMap-Mitwirkende · Esri World Imagery · OpenTopoMap (CC-BY-SA).</p>
   <p><b>Nicht zur Navigation, ohne Gewähr.</b> Wasserstand, Sedimente und Bewuchs verändern die tatsächliche Tiefe.</p>
   <button class="btn" id="infoclose">Schließen</button>
@@ -871,6 +893,47 @@ tb.addEventListener('click',()=>{ bd.classList.toggle('collapsed'); tb.textConte
 const info=document.getElementById('info');
 document.getElementById('infolink').addEventListener('click',()=>info.style.display='block');
 document.getElementById('infoclose').addEventListener('click',()=>info.style.display='none');
+
+// --- Wetter (Open-Meteo, ohne Key)
+const WX={lat:47.600,lon:10.671};
+const DIRS=['N','NNO','NO','ONO','O','OSO','SO','SSO','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+const dirTxt=d=>DIRS[Math.round(((d%360)+360)%360/22.5)%16];
+const f1=v=>(Math.round(v*10)/10).toString().replace('.',',');
+const arrow=(deg,s,c)=>'<svg width="'+s+'" height="'+s+'" viewBox="-12 -12 24 24" style="transform:rotate('+Math.round(deg)+'deg)"><path d="M0 -10L6 8L0 4L-6 8Z" fill="'+c+'" stroke="#0d2a50" stroke-width="1.2" stroke-linejoin="round"/></svg>';
+let windMarker=null; const windLayer=L.layerGroup().addTo(map);
+document.getElementById('cw').addEventListener('change',e=>e.target.checked?windLayer.addTo(map):map.removeLayer(windLayer));
+async function loadWx(){
+  const box=document.getElementById('wxnow'), strip=document.getElementById('wxstrip');
+  try{
+    const url='https://api.open-meteo.com/v1/forecast?latitude='+WX.lat+'&longitude='+WX.lon
+      +'&current=temperature_2m,apparent_temperature,precipitation,cloud_cover,pressure_msl,wind_speed_10m,wind_direction_10m,wind_gusts_10m'
+      +'&hourly=temperature_2m,precipitation_probability,pressure_msl,wind_speed_10m,wind_direction_10m'
+      +'&past_hours=24&forecast_hours=24&wind_speed_unit=kmh&timezone=Europe%2FBerlin';
+    const r=await fetch(url); if(!r.ok) throw new Error(r.status);
+    const w=await r.json(), c=w.current, h=w.hourly;
+    const key=c.time.slice(0,13); let i=h.time.findIndex(x=>x.slice(0,13)===key); if(i<0) i=24;
+    const dp=(k)=>(i-k>=0&&h.pressure_msl[i-k]!=null)?c.pressure_msl-h.pressure_msl[i-k]:null;
+    const d3=dp(3), d24=dp(24);
+    let trend='keine Trenddaten';
+    if(d3!==null){ const a=Math.abs(d3); const word=a<1?'stabil':(d3>0?(a>=3?'stark steigend':'steigend'):(a>=3?'stark fallend':'fallend')); trend=word+' ('+(d3>0?'+':'')+f1(d3)+' hPa / 3 h)'; }
+    box.innerHTML=
+      '<div><b>'+f1(c.temperature_2m)+' °C</b><span>gefühlt '+f1(c.apparent_temperature)+' °C</span></div>'
+     +'<div><b>'+Math.round(c.wind_speed_10m)+' km/h '+dirTxt(c.wind_direction_10m)+'</b><span>Böen bis '+Math.round(c.wind_gusts_10m)+' km/h</span></div>'
+     +'<div><b>'+Math.round(c.pressure_msl)+' hPa</b><span>'+trend+(d24!==null?' · 24 h: '+(d24>0?'+':'')+f1(d24):'')+'</span></div>'
+     +'<div><b>'+Math.round(c.cloud_cover)+' % Wolken</b><span>Niederschlag '+f1(c.precipitation)+' mm</span></div>';
+    let cells='';
+    for(let k=i+1;k<=i+12&&k<h.time.length;k++){
+      cells+='<div>'+h.time[k].slice(11,13)+' Uhr<br><b>'+Math.round(h.temperature_2m[k])+'°</b>'+arrow(h.wind_direction_10m[k]+180,18,'#fff')
+        +Math.round(h.wind_speed_10m[k])+' km/h<br><span style="color:var(--muted)">'+(h.precipitation_probability[k]??'–')+' %</span></div>';
+    }
+    strip.innerHTML=cells;
+    windLayer.clearLayers();
+    windLayer.addLayer(L.marker([WX.lat,WX.lon],{pane:'marker',interactive:false,icon:L.divIcon({className:'',iconSize:[0,0],
+      html:'<div class="windicon">'+arrow(c.wind_direction_10m+180,40,'#fff')+'<span>'+Math.round(c.wind_speed_10m)+' km/h '+dirTxt(c.wind_direction_10m)+'</span></div>'})}));
+  }catch(err){ box.textContent='Wetter nicht verfügbar'; strip.innerHTML=''; }
+}
+loadWx(); setInterval(loadWx,15*60*1000);
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden) loadWx(); });
 window.__test={depthAt,map};
 })();
 </script>
